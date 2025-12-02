@@ -17,17 +17,16 @@ class WebhookService
             );
 
             if($event->status === 'done'){
-                return true; // already processed
+                return true; 
             }
 
             $orderId = $payload['order_id'];
-            $result = $payload['result']; // success | failed
+            $result = $payload['result']; 
             $order = Order::lockForUpdate()->find($orderId);
 
             if(!$order){
                 $event->status = 'received';
                 $event->save();
-                // optionally dispatch job to retry processing later
                 return false;
             }
 

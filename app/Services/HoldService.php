@@ -12,10 +12,9 @@ class HoldService
     public function createHold(int $productId, int $qty): Hold
     {
         return DB::transaction(function() use($productId, $qty){
-            // Lock product row
+
             $product = Product::where('id', $productId)->lockForUpdate()->firstOrFail();
 
-            // compute available
             $reserved = DB::table('holds')
                 ->where('product_id', $productId)
                 ->where('status', 'active')
@@ -39,10 +38,9 @@ class HoldService
                 'status' => 'active'
             ]);
 
-            // atomic cache update
             Cache::increment("product:{$productId}:reserved", $qty);
 
             return $hold;
-        }, 5); // retry 5 times if deadlock
+        }, 5); 
     }
 }

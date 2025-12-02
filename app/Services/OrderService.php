@@ -30,7 +30,6 @@ class OrderService
                 'used_for_order_id' => $order->id
             ]);
 
-            // decrement reserved cache
             Cache::decrement("product:{$hold->product_id}:reserved", $hold->qty);
 
             return $order;

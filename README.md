@@ -1,59 +1,310 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
 
-## About Laravel
+# ✅ **README.md — Flash-Sale Checkout API (Laravel)**
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## **Overview**
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+This project implements a high-concurrency **Flash Sale Checkout API** using **Laravel**, built to guarantee correctness under heavy parallel traffic.
+It prevents **overselling**, supports **temporary holds**, **order creation**, and **idempotent payment webhooks**.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+The API exposes:
 
-## Learning Laravel
+* Accurate product stock endpoint
+* Short-lived holds (reserved stock)
+* Order creation using holds
+* Safe, idempotent payment webhook
+* Automatic release of expired holds
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+This implementation follows the requirements of:
+**Laravel Interview Task — Flash Sale Checkout (Concurrency & Correctness)**.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-## Laravel Sponsors
+## **Tech Stack**
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+* **Laravel** (v11/12 compatible)
+* **MySQL (InnoDB)**
+* **Laravel Cache** (Redis recommended but supports file/database)
+* **Queues** (for automatic hold expiry)
+* **Laravel Scheduler**
 
-### Premium Partners
+---
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+# **Core Concepts & Guarantees**
 
-## Contributing
+### ✅ 1. **Accurate Available Stock**
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Stock visibility is always correct because:
 
-## Code of Conduct
+* Holds reserve stock immediately.
+* Holds are stored in DB + cache.
+* Expired holds automatically release stock.
+* All write operations use DB transactions and row-level locking.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### ✅ 2. **Short-Lived Holds (Reservations)**
 
-## Security Vulnerabilities
+`POST /api/holds`
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+* Creates a 2-minute reservation.
+* Reduces available stock immediately.
+* Stored in DB and cache.
+* If time expires → a scheduled job auto-releases the stock.
 
-## License
+### Hold Expiry Handling
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Uses:
+
+* `expire_at` timestamp
+* Laravel Scheduled Command runs every minute to release expired holds
+* Safe from double-processing (DB locking)
+
+---
+
+### ✅ 3. **Order Creation**
+
+`POST /api/orders`
+
+* Validates hold is active & unused.
+* Locks the hold row using `SELECT … FOR UPDATE`.
+* Creates order in `pending_payment` state.
+* Stock is already reserved from the hold.
+
+---
+
+### ✅ 4. **Payment Webhook (Idempotent)**
+
+`POST /api/payments/webhook`
+
+Guarantees:
+
+* Webhook may arrive **multiple times** → processed once.
+* Webhook may arrive **before order creation** → waits & retries.
+* Uses unique **idempotency_key** to dedupe.
+* Safe concurrent processing via DB row locks.
+
+Final states:
+
+* If payment success → order marked `paid`
+* If payment fails → order marked `cancelled` and stock released back
+
+---
+
+### ⚙️ Idempotency Implementation
+
+Webhook handler stores:
+
+* `idempotency_key`
+* `payload_hash`
+* `status`
+
+Any repeated webhook with the same key returns the existing result.
+
+---
+
+# **Project Setup**
+
+### **1. Clone the repository**
+
+```bash
+git clone <repo-url>
+cd flash-sale
+```
+
+### **2. Install dependencies**
+
+```bash
+composer install
+```
+
+### **3. Copy environment file**
+
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+### **4. Configure .env**
+
+Database:
+
+```
+DB_DATABASE=flashsale
+DB_USERNAME=root
+DB_PASSWORD=
+```
+
+Cache (recommended):
+
+```
+CACHE_DRIVER=redis
+```
+
+Queues:
+
+```
+QUEUE_CONNECTION=database
+```
+
+---
+
+### **5. Run migrations and seed product**
+
+```bash
+php artisan migrate --seed
+```
+
+Seeder creates:
+
+* Product `ID = 1`
+* Price
+* Finite stock (example: 50)
+
+---
+
+### **6. Start queue worker**
+
+```bash
+php artisan queue:work
+```
+
+### **7. Start scheduler**
+
+(For auto-expire holds)
+
+```
+php artisan schedule:work
+```
+
+---
+
+## **API Endpoints**
+
+### **GET /api/products/{id}**
+
+Returns:
+
+* id
+* name
+* price
+* total stock
+* available stock
+  (calculated as: total stock − active holds − paid orders)
+
+---
+
+### **POST /api/holds**
+
+Body:
+
+```json
+{
+  "product_id": 1,
+  "qty": 1
+}
+```
+
+Returns:
+
+```json
+{
+  "hold_id": 14,
+  "expires_at": "2025-01-12T10:45:20Z"
+}
+```
+
+---
+
+### **POST /api/orders**
+
+Body:
+
+```json
+{
+  "hold_id": 14
+}
+```
+
+Returns:
+
+```json
+{
+  "order_id": 99,
+  "status": "pending_payment"
+}
+```
+
+---
+
+### **POST /api/payments/webhook**
+
+Body example:
+
+```json
+{
+  "idempotency_key": "pay_abc_123",
+  "order_id": 99,
+  "status": "success"
+}
+```
+
+Possible webhook statuses:
+
+* `success`
+* `failed`
+* `cancelled`
+
+---
+
+# **Testing the System**
+
+### **1. Simulate High Concurrency (Parallel Holds)**
+
+Use Postman Runner or artillery:
+
+```
+40 users
+each tries: POST /api/holds qty=1
+```
+
+Expected:
+
+* No overselling
+* Holds succeed until real available stock runs out
+* Remaining requests get error: “Insufficient stock”
+
+---
+
+### **2. Test Hold Expiry**
+
+Steps:
+
+1. Create hold
+2. Wait 2 minutes
+3. Check product availability → stock should return automatically
+
+---
+
+### **3. Test Webhook Idempotency**
+
+Send same webhook multiple times:
+
+```bash
+repeat 5 times
+POST /api/payments/webhook (same idempotency_key)
+```
+
+### **4. Test Out-of-Order Webhook**
+
+1. Send webhook before creating order
+2. Then create order normally
+3. Webhook processor will detect and fix final state
+
+---
+
+
+
+
+
+
+
+
